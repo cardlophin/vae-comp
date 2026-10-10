@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VAE Comparison Charts</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main>
+      <header class="page-head">
+        <div>
+          <p class="eyebrow">vae-comp · MNIST</p>
+          <h1>Dense VAE vs. CNN-VAE</h1>
+          <p class="lede">
+            Interactive view of <code>artifacts/*/history.csv</code>. The same renderer
+            (<code>charts.js</code>) produces the static SVGs embedded in the README.
+          </p>
+        </div>
+        <div class="theme-switch" role="group" aria-label="Theme">
+          <button type="button" data-theme-choice="auto" aria-pressed="true">Auto</button>
+          <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+          <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+        </div>
+      </header>
+
+      <section aria-labelledby="loss-title">
+        <div class="section-head">
+          <h2 id="loss-title">Loss curves</h2>
+          <div class="controls">
+            <div class="segmented" role="group" aria-label="Metric">
+              <button type="button" data-metric="total" aria-pressed="true">Total</button>
+              <button type="button" data-metric="bce" aria-pressed="false">BCE</button>
+              <button type="button" data-metric="kl" aria-pressed="false">KL</button>
+              <button type="button" data-metric="all" aria-pressed="false">All</button>
+            </div>
+            <label class="check"><input type="checkbox" data-split="val" checked /> validation</label>
+            <label class="check"><input type="checkbox" data-split="train" checked /> train</label>
+            <button type="button" class="ghost" data-download="loss">Download SVG</button>
+          </div>
+        </div>
+        <figure class="chart" id="loss-chart">
+          <div class="placeholder">Loading history.csv…</div>
+        </figure>
+        <div class="tooltip" id="tooltip" role="status" hidden></div>
+      </section>
+
+      <section aria-labelledby="test-title">
+        <div class="section-head">
+          <h2 id="test-title">Test set (best checkpoint)</h2>
+        </div>
+        <div class="table-wrap">
+          <table id="test-table">
+            <thead>
+              <tr>
+                <th scope="col">Model</th>
+                <th scope="col">Best epoch</th>
+                <th scope="col">−ELBO</th>
+                <th scope="col">BCE</th>
+                <th scope="col">KL</th>
+                <th scope="col">s / epoch</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section aria-labelledby="arch-title">
+        <div class="section-head">
+          <h2 id="arch-title">Architectures</h2>
+          <div class="controls">
+            <button type="button" class="ghost" data-download="arch-vae">Download VAE SVG</button>
+            <button type="button" class="ghost" data-download="arch-cnn">Download CNN SVG</button>
+          </div>
+        </div>
+        <figure class="chart" id="arch-vae"></figure>
+        <figure class="chart" id="arch-cnn"></figure>
+      </section>
+
+      <section class="fallback" id="fallback" hidden>
+        <h2>Load the CSV files manually</h2>
+        <p>
+          Browsers block <code>fetch</code> on <code>file://</code>. Serve the repo root with
+          <code>python3 -m http.server</code> and open
+          <code>http://localhost:8000/docs/charts/</code>, or pick the files here:
+        </p>
+        <label>Dense VAE history.csv <input type="file" accept=".csv" data-file="vae" /></label>
+        <label>CNN-VAE history.csv <input type="file" accept=".csv" data-file="cnn" /></label>
+      </section>
+    </main>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

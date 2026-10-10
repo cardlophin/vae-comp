@@ -54,7 +54,7 @@ struct MnistSplit {
 
 impl Dataset<MnistItem> for MnistSplit {
     fn get(&self, index: usize) -> Result<MnistItem, DatasetError> {
-        assert!(index < self.len(), "Índice fuera de la partición MNIST");
+        assert!(index < self.len(), "Index out of MNIST split bounds");
 
         self.source.get(self.start + index)
     }
@@ -95,7 +95,7 @@ pub fn build_loaders(
 
     assert!(
         config.validation_size < total_size,
-        "La validación debe ser menor que el dataset"
+        "Validation size must be smaller than the dataset"
     );
 
     let train_size = total_size - config.validation_size;

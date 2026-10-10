@@ -19,30 +19,30 @@ pub fn save_mnist_grid(
 ) -> ImageResult<()> {
     let [num_images, num_pixels] = images.dims();
 
-    assert!(num_images > 0, "No hay imágenes para guardar");
-    assert!(columns > 0, "El número de columnas debe ser positivo");
-    assert!(scale > 0, "La escala debe ser positiva");
+    assert!(num_images > 0, "No images to save");
+    assert!(columns > 0, "Number of columns must be positive");
+    assert!(scale > 0, "Scale must be positive");
 
     assert_eq!(
         num_pixels, DIGIT_PIXELS,
-        "Cada imagen debe contener 784 píxeles",
+        "Each image must contain 784 pixels",
     );
 
     let data = images.into_data();
 
     let pixels = data
         .try_to_vec::<f32>()
-        .expect("No se pudieron leer los píxeles del tensor");
+        .expect("Could not read pixels from tensor");
 
     assert!(
         pixels.iter().all(|value| value.is_finite()),
-        "Las imágenes contienen valores NaN o infinitos",
+        "Images contain NaN or infinite values",
     );
 
     let columns = columns.min(num_images);
     let rows = num_images.div_ceil(columns);
 
-    // Separación y margen exterior, en píxeles antes de ampliar.
+    // Spacing and outer margin, in pixels before upscaling.
     let padding = 2_usize;
 
     let grid_width = columns * DIGIT_WIDTH + (columns + 1) * padding;

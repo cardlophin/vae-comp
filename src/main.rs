@@ -17,19 +17,22 @@ const SEED: u64 = 42;
 const HIDDEN_DIM: usize = 512;
 const LATENT_DIM: usize = 16;
 
+const CNN_CHANNELS_1: usize = 32;
+const CNN_CHANNELS_2: usize = 64;
+
 fn main() {
     let architecture = std::env::args().nth(1).unwrap_or_else(|| "vae".to_owned());
 
     if matches!(architecture.as_str(), "-h" | "--help") {
-        println!("Uso:");
+        println!("Usage:");
         println!("  cargo run --release -- vae");
         println!("  cargo run --release -- cnn");
         return;
     }
 
     if !matches!(architecture.as_str(), "vae" | "cnn") {
-        eprintln!("Arquitectura desconocida: {architecture}");
-        eprintln!("Opciones válidas: vae, cnn");
+        eprintln!("Unknown architecture: {architecture}");
+        eprintln!("Valid options: vae, cnn");
         std::process::exit(2);
     }
 
@@ -67,13 +70,13 @@ fn main() {
 
     let loaders = build_loaders(&loader_config, &train_device, &eval_device);
 
-    // Semilla antes de inicializar los pesos.
+    // Seed before initializing weights.
     train_device.seed(SEED);
 
     match architecture.as_str() {
         "vae" => {
             println!(
-                "VAE denso: input={INPUT_DIM}, \
+                "Dense VAE: input={INPUT_DIM}, \
                  hidden={HIDDEN_DIM}, latent={LATENT_DIM}"
             );
 
@@ -91,11 +94,18 @@ fn main() {
 
         "cnn" => {
             println!(
-                "CNN-VAE: canales=[32, 64], \
+                "CNN-VAE: input={INPUT_DIM}, \
+                 channels=[{CNN_CHANNELS_1}, {CNN_CHANNELS_2}], \
                  latent={LATENT_DIM}"
             );
 
-            let model = CNNVAE::new(LATENT_DIM, &train_device);
+            let model = CNNVAE::new(
+                INPUT_DIM,
+                CNN_CHANNELS_1,
+                CNN_CHANNELS_2,
+                LATENT_DIM,
+                &train_device,
+            );
 
             train(
                 model,

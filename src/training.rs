@@ -107,13 +107,13 @@ impl LossAccumulator {
     }
 
     fn finish(self, beta: f32) -> LossSummary {
-        assert!(self.samples > 0, "No se procesaron muestras");
+        assert!(self.samples > 0, "No samples were processed");
 
         let values = self
             .sums
-            .expect("No hay métricas acumuladas")
+            .expect("No accumulated metrics")
             .try_into_vec_as::<f32>()
-            .expect("No se pudieron leer las métricas");
+            .expect("Could not read metrics");
 
         let reconstruction = values[0] as f64 / self.samples as f64;
 
@@ -123,7 +123,7 @@ impl LossAccumulator {
 
         assert!(
             total.is_finite() && reconstruction.is_finite() && kl.is_finite(),
-            "Pérdidas no finitas: \
+            "Non-finite losses: \
              total={total}, BCE={reconstruction}, KL={kl}"
         );
 
@@ -146,7 +146,7 @@ fn evaluate<M: VariationalModel>(
     let mut metrics = LossAccumulator::default();
 
     for batch_result in loader.iter() {
-        let batch = batch_result.expect("Error cargando evaluación");
+        let batch = batch_result.expect("Error loading evaluation batch");
 
         let images = batch.images;
         let batch_size = images.dims()[0];
@@ -190,13 +190,13 @@ pub fn train<M: VariationalModel>(
     assert!(config.beta >= 0.0);
     assert!(config.kl_warmup_epochs <= config.max_epochs);
 
-    std::fs::create_dir_all(output_dir).expect("No se pudo crear el directorio de resultados");
+    std::fs::create_dir_all(output_dir).expect("Could not create output directory");
 
     let mut optimizer = AdamConfig::new().init();
     let mut learning_rate = config.initial_lr;
 
     let history_file =
-        File::create(output_dir.join("history.csv")).expect("No se pudo crear el historial");
+        File::create(output_dir.join("history.csv")).expect("Could not create history file");
 
     let mut history = BufWriter::new(history_file);
 
@@ -205,7 +205,7 @@ pub fn train<M: VariationalModel>(
         "epoch,lr,beta,train_total,train_bce,train_kl,\
          val_total,val_bce,val_kl,train_seconds,epoch_seconds"
     )
-    .expect("Error escribiendo la cabecera");
+    .expect("Error writing header");
 
     let mut best_model: Option<M> = None;
     let mut best_loss = f64::INFINITY;
@@ -221,9 +221,7 @@ pub fn train<M: VariationalModel>(
     );
 
     for epoch in 1..=config.max_epochs {
-        train_device
-            .sync()
-            .expect("Error sincronizando el dispositivo");
+        train_device.sync().expect("Error synchronizing device");
 
         let epoch_start = Instant::now();
         let train_start = Instant::now();
@@ -233,7 +231,7 @@ pub fn train<M: VariationalModel>(
         let mut metrics = LossAccumulator::default();
 
         for batch_result in loaders.train.iter() {
-            let batch = batch_result.expect("Error cargando train");
+            let batch = batch_result.expect("Error loading training batch");
 
             let images = batch.images;
             let batch_size = images.dims()[0];
@@ -253,7 +251,7 @@ pub fn train<M: VariationalModel>(
 
         let train_metrics = metrics.finish(beta);
 
-        train_device.sync().expect("Error sincronizando train");
+        train_device.sync().expect("Error synchronizing training");
 
         let train_seconds = train_start.elapsed().as_secs_f64();
 
@@ -266,7 +264,7 @@ pub fn train<M: VariationalModel>(
             config.validation_mc_samples,
         );
 
-        eval_device.sync().expect("Error sincronizando validación");
+        eval_device.sync().expect("Error synchronizing validation");
 
         let can_select = epoch >= config.kl_warmup_epochs;
 
@@ -307,9 +305,9 @@ pub fn train<M: VariationalModel>(
             validation_metrics.reconstruction,
             validation_metrics.kl,
         )
-        .expect("Error escribiendo el historial");
+        .expect("Error writing history");
 
-        history.flush().expect("Error guardando el historial");
+        history.flush().expect("Error flushing history");
 
         if !can_select {
             continue;
@@ -328,7 +326,7 @@ pub fn train<M: VariationalModel>(
 
                 if next_lr < learning_rate {
                     println!(
-                        "Reduciendo lr: \
+                        "Reducing lr: \
                          {learning_rate:.6} -> {next_lr:.6}"
                     );
                 }
@@ -340,30 +338,30 @@ pub fn train<M: VariationalModel>(
 
         if bad_epochs >= config.early_stop_patience {
             println!(
-                "Parada temprana: {bad_epochs} épocas \
-                 sin mejora significativa"
+                "Early stopping: {bad_epochs} epochs \
+                 without significant improvement"
             );
             break;
         }
     }
 
-    let best_model = best_model.expect("No se seleccionó ningún modelo");
+    let best_model = best_model.expect("No model was selected");
 
     println!(
-        "Mejor época: {best_epoch}; \
+        "Best epoch: {best_epoch}; \
          val={best_loss:.4}"
     );
 
     model
         .save_file(output_dir.join("last.bpk"))
-        .expect("Error guardando el último modelo");
+        .expect("Error saving last model");
 
     best_model
         .clone()
         .save_file(output_dir.join("best.bpk"))
-        .expect("Error guardando el mejor modelo");
+        .expect("Error saving best model");
 
-    // Test únicamente después de seleccionar el modelo.
+    // Test only after model selection.
     let test_metrics = evaluate(
         &best_model,
         loaders.test.as_ref(),
@@ -384,7 +382,7 @@ pub fn train<M: VariationalModel>(
             test_metrics.total, test_metrics.reconstruction, test_metrics.kl,
         ),
     )
-    .expect("Error guardando las métricas de test");
+    .expect("Error saving test metrics");
 
     eval_device.seed(config.generation_seed);
 
@@ -398,10 +396,10 @@ pub fn train<M: VariationalModel>(
     let first = generated.clone().slice([0..1, 0..INPUT_DIM]);
 
     io::save_mnist_grid(generated, 8, 4, output_dir.join("generated-grid.png"))
-        .expect("Error guardando la cuadrícula");
+        .expect("Error saving sample grid");
 
     io::save_mnist_grid(first, 1, 8, output_dir.join("generated-single.png"))
-        .expect("Error guardando el dígito");
+        .expect("Error saving single sample");
 
-    println!("Resultados guardados en {}", output_dir.display());
+    println!("Results saved to {}", output_dir.display());
 }

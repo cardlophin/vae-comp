@@ -1,0 +1,8 @@
+{
+  "name": "vae-comp-charts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "export": "node export.js"
+  }
+}
