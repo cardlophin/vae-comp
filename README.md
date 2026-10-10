@@ -94,7 +94,7 @@ q_\phi(z \mid x)
 \mathcal{N}
 \left(
 \mu_\phi(x),
-\operatorname{diag}\left(\sigma_\phi^2(x)\right)
+\mathrm{diag}\left(\sigma_\phi^2(x)\right)
 \right).
 ```
 
@@ -107,7 +107,7 @@ following BCE-based training objective:
 =
 \mathbb{E}_{q_\phi(z \mid x)}
 \left[
-\operatorname{BCEWithLogits}
+\mathrm{BCEWithLogits}
 \left(
 a_\theta(z), x
 \right)
@@ -130,13 +130,13 @@ They are not binarized.
 For a decoder logit $a_j$, the reconstruction term is:
 
 ```math
-\operatorname{BCE}(a,x)
+\mathrm{BCE}(a,x)
 =
 -\sum_{j=1}^{784}
 \left[
-x_j \log \operatorname{sigmoid}(a_j)
+x_j \log \mathrm{sigmoid}(a_j)
 +
-(1-x_j)\log \operatorname{sigmoid}(-a_j)
+(1-x_j)\log \mathrm{sigmoid}(-a_j)
 \right].
 ```
 
