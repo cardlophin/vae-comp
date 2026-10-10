@@ -2,7 +2,7 @@
 
 # vae-comp
 
-**Dense VAE vs. convolutional VAE on MNIST, written in Rust with [Burn](https://burn.dev)**
+Dense and convolutional variational autoencoders on MNIST, implemented in Rust with [Burn](https://burn.dev).
 
 ![Rust 2024](https://img.shields.io/badge/Rust-2024-b7410e?style=flat-square&logo=rust&logoColor=white)
 ![Burn 0.22](https://img.shields.io/badge/Burn-0.22-2a78d6?style=flat-square)
@@ -11,172 +11,573 @@
 
 </div>
 
-This repository trains two variational autoencoders under the **same data split, loss,
-optimiser, schedule and seed**, so that the only thing that changes is the architecture:
+This project compares two variational autoencoder architectures using a shared
+training and evaluation pipeline:
 
-- **Dense VAE**: a multilayer perceptron that treats each digit as a flat 784-vector.
-- **CNN-VAE**: a convolutional encoder and a transposed-convolution decoder that keep the 28×28 spatial structure.
+- Dense VAE: a fully connected encoder and decoder operating on flattened
+  784-pixel images.
+- CNN-VAE: a convolutional encoder and transposed-convolution decoder operating
+  internally on the spatial structure of 28 × 28 images.
 
-Both use a 16-dimensional Gaussian latent space and a Bernoulli decoder.
+Both models use a 16-dimensional diagonal-Gaussian latent space and a decoder
+that produces one logit per pixel.
+
+The runs share the data split, preprocessing, loss definition, optimizer
+configuration, scheduling rules and seed settings. They do not have the same
+parameter count or computational workload, and their learning-rate trajectories
+can differ because scheduling depends on each model's validation loss.
 
 ## Results at a glance
 
-Test-set metrics for the checkpoint with the lowest validation loss, averaged over
-5 Monte Carlo samples of `z`. Losses are per image, in nats (lower is better).
+The table reports test metrics for each model's checkpoint with the lowest
+eligible validation loss. Test reconstruction loss is averaged over five
+posterior samples per image; the Gaussian KL term is computed analytically.
 
-| Model | Params | Best epoch | **−ELBO** | Reconstruction (BCE) | KL | Train time / epoch¹ |
+All losses are summed over pixels or latent dimensions and averaged over images.
+Natural logarithms are used, so the numerical units are nats per image.
+
+| Model | Parameters | Best epoch | BCE + KL | Reconstruction BCE | KL | Train time / epoch¹ |
 | :-- | --: | --: | --: | --: | --: | --: |
-| Dense VAE | 829,232 | 95 | 100.75 | 76.83 | **23.92** | **0.52 s** |
-| CNN-VAE | **220,385** | 98 | **96.66** | **72.65** | 24.00 | 3.04 s |
+| Dense VAE | 829,232 | 95 | 100.75 | 76.83 | 23.92 | 0.52 s |
+| CNN-VAE | 220,385 | 98 | 96.66 | 72.65 | 24.00 | 3.04 s |
 
-¹ Mean over epochs 2–100 on Apple Metal (epoch 1 includes kernel compilation).
+¹ Mean training-loop wall-clock time over epochs 2–100 in the reported Metal
+runs. Validation is not included in this column. Epoch 1 is excluded to reduce
+the influence of first-use initialization and compilation costs. This is not
+GPU kernel time or a hardware-independent benchmark.
+
+Metrics are rounded independently; the displayed BCE and KL values may not sum
+exactly to the displayed total.
 
 > [!NOTE]
-> The CNN-VAE reaches a **4.1 nat lower negative ELBO with 3.8× fewer parameters**.
-> Almost all of the gain comes from reconstruction (−4.2 nats of BCE): both models spend
-> roughly the same ~24 nats of KL on the latent code, but the convolutional decoder
-> uses it more efficiently. The price is about 6× more compute per epoch.
+> In these runs, the CNN-VAE achieved a 4.09-nat lower test objective with
+> approximately 3.76× fewer parameters.
+>
+> The difference is driven mainly by reconstruction: its BCE is 4.18 nats lower,
+> while its KL is 0.08 nats higher. Its measured training time per epoch is
+> approximately 5.8× that of the dense model.
+>
+> These are single-seed results for two specific architectures, not a general
+> ranking of dense and convolutional VAEs.
 
-## Method
+## What this experiment measures
 
-### Variational autoencoder
+The experiment evaluates three related but distinct properties:
 
-A VAE learns a latent-variable model $p_\theta(x, z) = p_\theta(x \mid z)\,p(z)$ with prior
-$p(z) = \mathcal{N}(0, I)$, and an amortised encoder
-$q_\phi(z \mid x) = \mathcal{N}\big(\mu_\phi(x), \operatorname{diag}\sigma^2_\phi(x)\big)$.
-Both networks are trained jointly by maximising the evidence lower bound (ELBO).
-In this repository we minimise its negative:
+- Reconstruction: how well the decoder reproduces an image when the latent code
+  is sampled from its encoder posterior.
+- Regularization: how far that posterior is from the standard-normal prior.
+- Prior generation: what the decoder produces when given a latent code sampled
+  directly from the prior.
 
-$$
-\mathcal{L}(x) = \underbrace{-\,\mathbb{E}_{q_\phi(z\mid x)}\big[\log p_\theta(x \mid z)\big]}_{\text{reconstruction (BCE)}}
-\;+\; \beta\,\underbrace{D_{\mathrm{KL}}\big(q_\phi(z \mid x)\,\|\,p(z)\big)}_{\text{regulariser}}
-$$
+The test loss measures the first two. The sample grids illustrate the third,
+but do not provide an objective measure of sample quality, diversity or
+coverage of all digit classes.
 
-- **Reconstruction.** Pixels are scaled to $[0,1]$ and modelled as Bernoulli. The decoder
-  outputs logits, and the BCE is computed with `log_sigmoid` for numerical stability,
-  summed over the 784 pixels and averaged over the batch.
-- **KL term.** Closed form for diagonal Gaussians:
-  $\tfrac12 \sum_j \big(\mu_j^2 + \sigma_j^2 - \log\sigma_j^2 - 1\big)$.
-- **Reparameterisation trick.** $z = \mu + \sigma \odot \varepsilon,\ \varepsilon \sim \mathcal{N}(0, I)$,
-  so gradients flow through the sampling step. The encoder predicts $\log\sigma^2$ to keep $\sigma > 0$.
+A lower reconstruction loss does not automatically imply better prior samples.
 
-### Architectures
+## Objective
+
+### Latent-variable model
+
+The prior is a standard normal distribution:
+
+\[
+p(z) = \mathcal{N}(0, I).
+\]
+
+The encoder predicts a diagonal-Gaussian approximate posterior:
+
+\[
+q_\phi(z \mid x)
+=
+\mathcal{N}
+\left(
+\mu_\phi(x),
+\operatorname{diag}\left(\sigma_\phi^2(x)\right)
+\right).
+\]
+
+For a valid observation likelihood, the negative ELBO consists of an expected
+negative log-likelihood and a KL regularization term. This project uses the
+following BCE-based training objective:
+
+\[
+\mathcal{L}_\beta(x)
+=
+\mathbb{E}_{q_\phi(z \mid x)}
+\left[
+\operatorname{BCEWithLogits}
+\left(
+a_\theta(z), x
+\right)
+\right]
++
+\beta
+D_{\mathrm{KL}}
+\left(
+q_\phi(z \mid x) \,\|\, \mathcal{N}(0,I)
+\right),
+\]
+
+where \(a_\theta(z)\) denotes the decoder's pixel logits.
+
+### Reconstruction loss
+
+Pixels are divided by 255 and kept as grayscale values in \([0,1]\).
+They are not binarized.
+
+For a decoder logit \(a_j\), the reconstruction term is:
+
+\[
+\operatorname{BCE}(a,x)
+=
+-\sum_{j=1}^{784}
+\left[
+x_j \log \operatorname{sigmoid}(a_j)
++
+(1-x_j)\log \operatorname{sigmoid}(-a_j)
+\right].
+\]
+
+The implementation uses `log_sigmoid` directly for numerical stability.
+It sums over the 784 pixels and averages over images in the batch.
+
+> [!IMPORTANT]
+> This is the commonly used Bernoulli-style BCE objective applied to continuous
+> grayscale targets.
+>
+> A Bernoulli distribution has support on binary observations, not arbitrary
+> values in \([0,1]\). Consequently, the reported BCE + KL should not be treated
+> as an exact negative ELBO or negative log-likelihood for a normalized
+> continuous-image likelihood.
+>
+> The values are useful for comparisons under this shared protocol, but should
+> not be compared directly with published likelihood results on binarized MNIST
+> or with different observation models.
+
+For binary targets and \(\beta=1\), the same loss expression corresponds to a
+Monte Carlo estimate of the negative ELBO under a Bernoulli decoder.
+
+### KL regularization
+
+The encoder outputs `mu` and `logvar`, with:
+
+\[
+\mathrm{logvar}_j = \log \sigma_j^2.
+\]
+
+The KL divergence has the closed form:
+
+\[
+D_{\mathrm{KL}}
+=
+\frac{1}{2}
+\sum_j
+\left[
+\mu_j^2
++
+\exp(\mathrm{logvar}_j)
+-
+\mathrm{logvar}_j
+-
+1
+\right].
+\]
+
+It is summed over latent dimensions and averaged over images.
+
+A similar average KL does not imply that two models encode the same amount of
+information. The expected KL decomposes as:
+
+\[
+\mathbb{E}_{p_{\mathrm{data}}(x)}
+\left[
+D_{\mathrm{KL}}
+\left(
+q_\phi(z \mid x) \,\|\, p(z)
+\right)
+\right]
+=
+I_q(X;Z)
++
+D_{\mathrm{KL}}
+\left(
+q_\phi(z) \,\|\, p(z)
+\right),
+\]
+
+where \(q_\phi(z)\) is the aggregated posterior.
+
+The KL therefore includes both input–latent mutual information and mismatch
+between the aggregated posterior and the prior.
+
+### Reparameterization
+
+Latent codes are sampled using:
+
+\[
+z
+=
+\mu
++
+\exp\left(\frac{1}{2}\mathrm{logvar}\right)
+\odot \varepsilon,
+\qquad
+\varepsilon \sim \mathcal{N}(0,I).
+\]
+
+The random noise is independent of the encoder parameters. The transformation
+from `mu`, `logvar` and noise to `z` remains differentiable.
+
+Computing the standard deviation through an exponential gives positive values
+in exact arithmetic; floating-point overflow or underflow remains possible.
+
+## Architectures
+
+### Dense VAE
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/figures/arch-vae-dark.svg">
-  <img alt="Dense VAE: Linear 784→512 ReLU, heads μ and log σ² of size 16, decoder Linear 16→512 ReLU, Linear 512→784, sigmoid." src="docs/figures/arch-vae-light.svg" width="100%">
+  <img alt="Dense VAE: input 784, hidden layer 512 with ReLU, Gaussian heads of size 16, decoder hidden layer 512 with ReLU, and 784 output logits. Sigmoid is applied for visualization." src="docs/figures/arch-vae-light.svg" width="100%">
 </picture>
 
-The **dense VAE** (`src/models/vae.rs`) has one 512-unit hidden layer on each side.
-Its weights use Xavier-uniform initialisation with a √2 gain for ReLU layers and
-a gain of 1 for the output layer.
+Implemented in `rs/src/models/vae.rs`.
+
+```text
+Encoder:
+[N, 784]
+  → Linear 784 → 512 + ReLU
+  → separate Linear heads 512 → 16 for mu and logvar
+
+Decoder:
+[N, 16]
+  → Linear 16 → 512 + ReLU
+  → Linear 512 → 784 logits
+```
+
+There is one hidden layer in the encoder and one in the decoder. The Gaussian
+heads and final output layer have no activation in the training path.
+
+Dense layers are constructed through the project's Xavier-uniform helper in
+`rs/src/models/utils.rs`. Initialization gains are configured at each call site.
+
+### CNN-VAE
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/figures/arch-cnn-dark.svg">
-  <img alt="CNN-VAE: two stride-2 4×4 convolutions (32, 64 channels) to 64×7×7, linear heads μ and log σ², decoder Linear 16→3136 reshaped to 64×7×7 and two stride-2 transposed convolutions back to 1×28×28." src="docs/figures/arch-cnn-light.svg" width="100%">
+  <img alt="CNN-VAE: two stride-2 convolutions reduce 1×28×28 to 64×7×7, linear Gaussian heads produce a 16-dimensional latent code, and a linear projection followed by two transposed convolutions reconstructs 1×28×28 logits." src="docs/figures/arch-cnn-light.svg" width="100%">
 </picture>
 
-The **CNN-VAE** (`src/models/cnnvae.rs`) downsamples 28→14→7 with two stride-2 convolutions,
-then mirrors the path with transposed convolutions. Most of its parameters are in the
-linear layers around the 3,136-dimensional bottleneck, not in the convolutions.
+Implemented in `rs/src/models/cnnvae.rs`.
 
-### Training protocol
+```text
+Encoder:
+[N, 784]
+  → reshape [N, 1, 28, 28]
+  → Conv2d 1 → 32, kernel 4, stride 2, padding 1 + ReLU
+  → Conv2d 32 → 64, kernel 4, stride 2, padding 1 + ReLU
+  → flatten [N, 3136]
+  → separate Linear heads 3136 → 16 for mu and logvar
 
-Both runs share `TrainingConfig` in `src/main.rs`:
+Decoder:
+[N, 16]
+  → Linear 16 → 3136 + ReLU
+  → reshape [N, 64, 7, 7]
+  → ConvTranspose2d 64 → 32, kernel 4, stride 2, padding 1 + ReLU
+  → ConvTranspose2d 32 → 1, kernel 4, stride 2, padding 1
+  → flatten [N, 784] logits
+```
 
-| | |
+Spatial resolution changes as \(28 \rightarrow 14 \rightarrow 7\) in the encoder
+and \(7 \rightarrow 14 \rightarrow 28\) in the decoder.
+
+The model is not fully convolutional: it uses three linear projections around
+the 3,136-dimensional feature representation.
+
+The CNN layers use the initialization provided by their Burn configurations,
+rather than the dense model's custom linear helper. Initialization is therefore
+not identical across architectures.
+
+### Parameter counts
+
+Counts include trainable weights and biases for the configurations above.
+
+| Component | Dense VAE | CNN-VAE |
+| :-- | --: | --: |
+| Encoder feature layers | 401,920 | 33,376 |
+| Gaussian heads | 16,416 | 100,384 |
+| Decoder | 410,896 | 86,625 |
+| Total | 829,232 | 220,385 |
+
+In the CNN-VAE, the two Gaussian heads and initial decoder linear projection
+contain 153,696 parameters: approximately 69.7% of the total.
+
+Fewer parameters do not necessarily mean less arithmetic or faster execution.
+Convolutional weights are reused across spatial positions.
+
+## Training protocol
+
+Configuration is defined in `rs/src/main.rs`; the shared implementation is in
+`rs/src/training.rs`.
+
+| Setting | Value |
 | :-- | :-- |
-| Data split | 54,000 train / 6,000 validation (shuffled from the MNIST train set, seed 42) / 10,000 test |
-| Optimiser | Adam, batch size 256, initial LR 1e-3 |
-| LR schedule | Reduce on plateau: ×0.5 after 5 epochs without a 0.05 improvement, floor 1e-5 |
-| β warm-up | β grows linearly from 0.2 to 1 over the first 5 epochs to avoid early posterior collapse |
-| Early stopping | Patience 15 epochs (neither run triggered it within 100 epochs) |
-| Model selection | Lowest validation −ELBO at β = 1, considered only after warm-up |
-| Evaluation | Validation: 3 MC samples · Test: 5 MC samples, run once on the selected checkpoint |
+| Training data | 54,000 images |
+| Validation data | 6,000 images, held out from the original MNIST training set |
+| Test data | 10,000 images |
+| Split seed | 42 |
+| Preprocessing | Grayscale pixel values divided by 255; no binarization |
+| Latent dimensions | 16 |
+| Optimizer | Adam |
+| Batch size | 256 |
+| Data-loader workers | 2 |
+| Initial learning rate | 1e-3 |
+| Minimum learning rate | 1e-5 |
+| Maximum epochs | 100 |
+| LR reduction | Multiply by 0.5 after 5 epochs without a significant validation improvement |
+| Improvement threshold | 0.05 nats per image |
+| KL warm-up | Training beta is 0.2, 0.4, 0.6, 0.8 and 1.0 in epochs 1–5; then remains at 1.0 |
+| Early stopping | 15 epochs without a significant validation improvement |
+| Checkpoint selection | Lowest validation BCE + KL, evaluated with beta = 1, starting at epoch 5 |
+| Validation sampling | 3 posterior samples per image |
+| Final test sampling | 5 posterior samples per image |
+
+The KL warm-up is intended to ease the introduction of regularization. It does
+not guarantee prevention of posterior collapse, and its benefit is not isolated
+by this comparison.
+
+Validation always uses beta = 1. Training totals during warm-up therefore use a
+different weighting and should not be compared directly with validation totals.
+
+Checkpoint selection and patience use different rules:
+
+- Any strictly lower eligible validation loss updates the best checkpoint.
+- A decrease greater than `min_delta` relative to the patience reference resets
+  the scheduler and early-stopping counters.
+- Smaller improvements can update the checkpoint without resetting those
+  counters.
+
+Both reported runs completed 100 epochs; early stopping did not trigger.
 
 ## Training curves
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/figures/loss-total-dark.svg">
-  <img alt="Total loss per epoch for both models. CNN-VAE stays about 4 nats below the dense VAE through training; final validation 97.25 vs 101.46." src="docs/figures/loss-total-light.svg" width="100%">
+  <img alt="Training and validation BCE-plus-KL objectives for the dense VAE and CNN-VAE." src="docs/figures/loss-total-light.svg" width="100%">
 </picture>
 
-The CNN-VAE pulls ahead within the first ~10 epochs and the gap stays roughly constant.
-The small steps around epochs 65, 77 and 85–97 come from learning-rate reductions.
-The train/validation gap is small for both models (≈1.3–1.8 nats), so neither overfits noticeably.
-Both curves are still trending down at epoch 100.
+The plotted runs show a lower objective for the CNN-VAE. Learning-rate changes
+and beta warm-up should be considered when interpreting changes in slope.
+
+Training metrics average losses computed while the model parameters are being
+updated. Validation metrics are computed afterward using a fixed evaluation
+snapshot and multiple posterior samples. They are not identical measurements.
+
+A small train/validation gap is encouraging, but does not prove the absence of
+overfitting or establish that the models have converged.
+
+The selected checkpoints are epochs 95 and 98, respectively. The table reports
+test results for those checkpoints, not necessarily for the final epoch.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/figures/loss-components-dark.svg">
-  <img alt="Left: reconstruction BCE, CNN-VAE lower (73.4 vs 77.5). Right: KL divergence, both models converge to about 24 nats." src="docs/figures/loss-components-light.svg" width="100%">
+  <img alt="Reconstruction BCE and Gaussian KL plotted separately for both architectures." src="docs/figures/loss-components-light.svg" width="100%">
 </picture>
 
-Splitting the loss shows where the difference lives. The **KL term converges to ≈24 nats
-for both models**, so they encode a similar amount of information in `z`. The
-**reconstruction term is consistently ~4 nats lower** for the CNN-VAE, whose locality
-and weight sharing suit image data.
+The test results show that the CNN-VAE's lower total objective is primarily
+associated with lower reconstruction BCE, while the average KL terms are close.
 
-## Samples
+This is consistent with a benefit from spatial structure and weight sharing,
+but the experiment does not isolate those factors from other architectural and
+initialization differences.
 
-64 digits decoded from $z \sim \mathcal{N}(0, I)$ with each model's best checkpoint:
+## Generated images
+
+The following grids use each model's best validation checkpoint and 64 latent
+codes sampled from the standard-normal prior:
+
+\[
+z \sim \mathcal{N}(0,I).
+\]
 
 | Dense VAE | CNN-VAE |
 | :--: | :--: |
-| <img src="artifacts/vae/generated-grid.png" width="360" alt="64 samples from the dense VAE"> | <img src="artifacts/cnn/generated-grid.png" width="360" alt="64 samples from the CNN-VAE"> |
+| <img src="artifacts/vae/generated-grid.png" width="360" alt="64 prior-decoded images from the dense VAE"> | <img src="artifacts/cnn/generated-grid.png" width="360" alt="64 prior-decoded images from the CNN-VAE"> |
 
-The CNN samples are generally crisper, with more continuous strokes. The dense VAE produces
-more blurry or ambiguous digits, the typical artefact of a decoder with no spatial prior.
+The saved grayscale intensities are `sigmoid(decoder_logits)`: the decoder's
+pixel-probability outputs. Pixels are not additionally sampled from Bernoulli
+distributions.
+
+These grids support qualitative inspection of strokes and digit shapes. They
+do not establish class balance, novelty, distributional coverage or an objective
+sample-quality advantage.
+
+For a more informative comparison, also inspect held-out originals alongside:
+
+- Reconstructions from `decode(mu)`, without posterior sampling.
+- Reconstructions using sampled latent codes from the encoder posterior.
 
 ## Reproduce
 
-Requires a recent Rust toolchain and a Mac with Metal (the backend is set in `src/main.rs`).
-MNIST is downloaded automatically by Burn on the first run.
+### Requirements
+
+- A Rust toolchain supporting edition 2024.
+- The Burn version and features specified in `Cargo.toml`.
+- A Mac supported by the configured Metal backend.
+- Network access on the first run to obtain MNIST.
+- Node.js to regenerate the SVG figures.
+- Python 3 to serve the optional chart viewer.
+
+The training entry point selects Metal explicitly. Other platforms require
+changing the device selection and enabling the corresponding Burn backend.
+
+### Run training
+
+From the repository root:
 
 ```bash
-cargo run --release -- vae   # → artifacts/vae/
-cargo run --release -- cnn   # → artifacts/cnn/
+cargo run --release -- vae
+cargo run --release -- cnn
 ```
 
-Each run writes to `artifacts/<model>/`:
+Running without an architecture argument defaults to the dense VAE:
+
+```bash
+cargo run --release
+```
+
+Show CLI help:
+
+```bash
+cargo run --release -- --help
+```
+
+### Outputs
+
+Each run writes to `artifacts/<model>/`, where `<model>` is `vae` or `cnn`.
 
 | File | Content |
 | :-- | :-- |
-| `history.csv` | Per-epoch LR, β, train/val total/BCE/KL, timings |
-| `test.csv` | Best epoch and test −ELBO/BCE/KL |
-| `best.bpk`, `last.bpk` | Model weights (git-ignored) |
-| `generated-grid.png`, `generated-single.png` | Samples from the prior |
+| `history.csv` | Per-epoch learning rate, beta, train/validation losses and timings |
+| `test.csv` | Selected epoch and final test BCE + KL, BCE and KL |
+| `best.bpk` | Weights of the checkpoint selected by validation |
+| `last.bpk` | Weights at the end of training |
+| `generated-grid.png` | Grid of 64 prior-decoded images |
+| `generated-single.png` | Enlarged first image from the grid |
+
+> [!WARNING]
+> Re-running an architecture overwrites the files in its output directory.
+> Copy or rename that directory before starting a run you want to preserve.
+>
+> The weight files do not contain Adam state or the complete training state.
+> The current CLI starts a new training run; it does not resume training.
+> Checkpoints from different architectures or layer dimensions are not
+> interchangeable.
+
+On macOS, open the generated grids with:
+
+```bash
+open artifacts/vae/generated-grid.png
+open artifacts/cnn/generated-grid.png
+```
+
+## Timing and reproducibility
+
+`train_seconds` measures the training loop, metric extraction and device
+synchronization. `epoch_seconds` also includes validation and checkpoint
+selection work performed within the measured epoch.
+
+The timing table above summarizes `train_seconds`, not full epoch duration.
+
+For reproducible performance comparisons, record:
+
+- Mac model and chip.
+- Operating-system version.
+- Rust and Burn versions, including the dependency lockfile.
+- Precision, batch size and worker count.
+- Warm-up policy and measured epochs.
+- Whether loading, validation and metric extraction are included.
+- Background workload and power conditions.
+
+The figures reported here do not establish an advantage over PyTorch: no
+equivalent PyTorch benchmark is included.
+
+Using the same seed settings makes the split and random operations repeatable
+to the extent supported by the execution environment. It does not guarantee
+bitwise-identical runs, identical initial weights across architectures or equal
+random-number consumption.
+
+For stronger model-quality conclusions, repeat each architecture with multiple
+seeds and report mean and variability rather than only a single run.
 
 ## Charts
 
-All figures in this README come from a small dependency-free template in
-[`docs/charts/`](docs/charts):
+The visualization tooling is in [`docs/charts/`](docs/charts).
 
 | File | Role |
 | :-- | :-- |
-| `charts.js` | Pure SVG renderers (loss curves, architecture diagrams) shared by browser and Node |
-| `index.html` · `style.css` · `app.js` | Interactive viewer: metric tabs, train/val toggles, hover tooltips, light/dark theme, SVG download |
-| `export.js` | Writes the light and dark SVGs in `docs/figures/` used above |
+| `charts.js` | SVG renderers for loss curves and architecture diagrams |
+| `index.html`, `style.css`, `app.js` | Interactive chart viewer |
+| `export.js` | Exports light and dark SVGs to `docs/figures/` |
+
+Regenerate the README figures after updating the training results:
 
 ```bash
-# Regenerate README figures after a new training run
 node docs/charts/export.js
+```
 
-# Open the interactive viewer
-python3 -m http.server     # from the repo root
+Serve the viewer from the repository root:
+
+```bash
+python3 -m http.server
+```
+
+Then open:
+
+```bash
 open http://localhost:8000/docs/charts/
 ```
 
+The SVGs embedded in this README are exported snapshots. Regenerate them after
+a new experiment so that figures, tables and CSV results remain consistent.
+
 ## Project structure
 
+```text
+.
+├── Cargo.toml
+├── rs/
+│   └── src/
+│       ├── main.rs          # CLI, configuration and model selection
+│       ├── training.rs      # Shared loss, training and evaluation
+│       ├── io.rs            # PNG export and io module declaration
+│       ├── io/
+│       │   └── mnist.rs     # MNIST preprocessing, split and loaders
+│       ├── models.rs        # Shared VariationalModel interface
+│       └── models/
+│           ├── vae.rs       # Dense VAE
+│           ├── cnnvae.rs    # Convolutional VAE
+│           └── utils.rs     # Dense-layer initialization helper
+├── artifacts/
+│   ├── vae/
+│   └── cnn/
+└── docs/
+    ├── charts/
+    └── figures/
 ```
-src/
-├── main.rs          # CLI entry point, hyperparameters, model selection
-├── training.rs      # ELBO loss, training loop, LR schedule, early stopping, evaluation
-├── io.rs            # Saves sample grids as PNG
-├── io/mnist.rs      # MNIST batcher and train/val/test loaders
-├── models.rs        # VariationalModel trait shared by both models
-└── models/
-    ├── vae.rs       # Dense VAE
-    ├── cnnvae.rs    # Convolutional VAE
-    └── utils.rs     # Xavier-initialised linear layer helper
-```
+
+The binary source path is configured in `Cargo.toml`.
+
+## Limitations
+
+- Results come from one seed per architecture.
+- Hardware details are required to contextualize the timing figures.
+- Architectures differ in parameter count, operations and initialization.
+- BCE is applied to continuous grayscale targets rather than binary observations.
+- KL is not a direct measurement of latent mutual information or disentanglement.
+- Sample grids are qualitative, not distribution-level evaluations.
+- Validation uses a finite Monte Carlo estimate and therefore has sampling noise.
+
+This repository is a controlled implementation comparison under a shared
+protocol, not a claim that either architecture is universally superior.
