@@ -22,7 +22,7 @@ const figures = {
       runs,
       theme,
       metrics: ["total"],
-      title: "Negative ELBO on MNIST",
+      title: "BCE + KL objective on MNIST",
       subtitle: "Per-sample loss in nats · lower is better · y-axis starts after warm-up epochs",
     }),
   "loss-components": (theme) =>
@@ -31,7 +31,7 @@ const figures = {
       theme,
       metrics: ["bce", "kl"],
       title: "Loss decomposition",
-      subtitle: "Reconstruction term vs. KL regulariser",
+      subtitle: "Reconstruction term vs. KL regularization",
     }),
   "arch-vae": (theme) => renderArchitecture({ model: "vae", theme }),
   "arch-cnn": (theme) => renderArchitecture({ model: "cnn", theme }),

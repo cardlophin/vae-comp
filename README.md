@@ -39,10 +39,10 @@ Natural logarithms are used, so the numerical units are nats per image.
 | Model | Parameters | Best epoch | BCE + KL | Reconstruction BCE | KL | Train time / epoch¹ |
 | :-- | --: | --: | --: | --: | --: | --: |
 | Dense VAE | 829,232 | 95 | 100.75 | 76.83 | 23.92 | 0.52 s |
-| CNN-VAE | 220,385 | 98 | 96.66 | 72.65 | 24.00 | 3.04 s |
+| CNN-VAE | 220,385 | 96 | 95.72 | 72.12 | 23.59 | 3.15 s |
 
 ¹ Mean training-loop wall-clock time over epochs 2–100 in the reported Metal
-runs. Validation is not included in this column. Epoch 1 is excluded to reduce
+runs, measured on an Apple M4 (macOS 26.6). Validation is not included in this column. Epoch 1 is excluded to reduce
 the influence of first-use initialization and compilation costs. This is not
 GPU kernel time or a hardware-independent benchmark.
 
@@ -50,12 +50,12 @@ Metrics are rounded independently; the displayed BCE and KL values may not sum
 exactly to the displayed total.
 
 > [!NOTE]
-> In these runs, the CNN-VAE achieved a 4.09-nat lower test objective with
+> In these runs, the CNN-VAE achieved a 5.03-nat lower test objective with
 > approximately 3.76× fewer parameters.
 >
-> The difference is driven mainly by reconstruction: its BCE is 4.18 nats lower,
-> while its KL is 0.08 nats higher. Its measured training time per epoch is
-> approximately 5.8× that of the dense model.
+> The difference is driven mainly by reconstruction: its BCE is 4.71 nats lower,
+> while its KL is 0.33 nats lower. Its measured training time per epoch is
+> approximately 6.1× that of the dense model.
 >
 > These are single-seed results for two specific architectures, not a general
 > ranking of dense and convolutional VAEs.
@@ -82,13 +82,13 @@ A lower reconstruction loss does not automatically imply better prior samples.
 
 The prior is a standard normal distribution:
 
-\[
+$$
 p(z) = \mathcal{N}(0, I).
-\]
+$$
 
 The encoder predicts a diagonal-Gaussian approximate posterior:
 
-\[
+$$
 q_\phi(z \mid x)
 =
 \mathcal{N}
@@ -96,13 +96,13 @@ q_\phi(z \mid x)
 \mu_\phi(x),
 \operatorname{diag}\left(\sigma_\phi^2(x)\right)
 \right).
-\]
+$$
 
 For a valid observation likelihood, the negative ELBO consists of an expected
 negative log-likelihood and a KL regularization term. This project uses the
 following BCE-based training objective:
 
-\[
+$$
 \mathcal{L}_\beta(x)
 =
 \mathbb{E}_{q_\phi(z \mid x)}
@@ -118,18 +118,18 @@ D_{\mathrm{KL}}
 \left(
 q_\phi(z \mid x) \,\|\, \mathcal{N}(0,I)
 \right),
-\]
+$$
 
-where \(a_\theta(z)\) denotes the decoder's pixel logits.
+where $a_\theta(z)$ denotes the decoder's pixel logits.
 
 ### Reconstruction loss
 
-Pixels are divided by 255 and kept as grayscale values in \([0,1]\).
+Pixels are divided by 255 and kept as grayscale values in $[0,1]$.
 They are not binarized.
 
-For a decoder logit \(a_j\), the reconstruction term is:
+For a decoder logit $a_j$, the reconstruction term is:
 
-\[
+$$
 \operatorname{BCE}(a,x)
 =
 -\sum_{j=1}^{784}
@@ -138,7 +138,7 @@ x_j \log \operatorname{sigmoid}(a_j)
 +
 (1-x_j)\log \operatorname{sigmoid}(-a_j)
 \right].
-\]
+$$
 
 The implementation uses `log_sigmoid` directly for numerical stability.
 It sums over the 784 pixels and averages over images in the batch.
@@ -148,7 +148,7 @@ It sums over the 784 pixels and averages over images in the batch.
 > grayscale targets.
 >
 > A Bernoulli distribution has support on binary observations, not arbitrary
-> values in \([0,1]\). Consequently, the reported BCE + KL should not be treated
+> values in $[0,1]$. Consequently, the reported BCE + KL should not be treated
 > as an exact negative ELBO or negative log-likelihood for a normalized
 > continuous-image likelihood.
 >
@@ -156,20 +156,20 @@ It sums over the 784 pixels and averages over images in the batch.
 > not be compared directly with published likelihood results on binarized MNIST
 > or with different observation models.
 
-For binary targets and \(\beta=1\), the same loss expression corresponds to a
+For binary targets and $\beta=1$, the same loss expression corresponds to a
 Monte Carlo estimate of the negative ELBO under a Bernoulli decoder.
 
 ### KL regularization
 
 The encoder outputs `mu` and `logvar`, with:
 
-\[
+$$
 \mathrm{logvar}_j = \log \sigma_j^2.
-\]
+$$
 
 The KL divergence has the closed form:
 
-\[
+$$
 D_{\mathrm{KL}}
 =
 \frac{1}{2}
@@ -183,14 +183,14 @@ D_{\mathrm{KL}}
 -
 1
 \right].
-\]
+$$
 
 It is summed over latent dimensions and averaged over images.
 
 A similar average KL does not imply that two models encode the same amount of
 information. The expected KL decomposes as:
 
-\[
+$$
 \mathbb{E}_{p_{\mathrm{data}}(x)}
 \left[
 D_{\mathrm{KL}}
@@ -205,9 +205,9 @@ D_{\mathrm{KL}}
 \left(
 q_\phi(z) \,\|\, p(z)
 \right),
-\]
+$$
 
-where \(q_\phi(z)\) is the aggregated posterior.
+where $q_\phi(z)$ is the aggregated posterior.
 
 The KL therefore includes both input–latent mutual information and mismatch
 between the aggregated posterior and the prior.
@@ -216,7 +216,7 @@ between the aggregated posterior and the prior.
 
 Latent codes are sampled using:
 
-\[
+$$
 z
 =
 \mu
@@ -225,7 +225,7 @@ z
 \odot \varepsilon,
 \qquad
 \varepsilon \sim \mathcal{N}(0,I).
-\]
+$$
 
 The random noise is independent of the encoder parameters. The transformation
 from `mu`, `logvar` and noise to `z` remains differentiable.
@@ -242,7 +242,7 @@ in exact arithmetic; floating-point overflow or underflow remains possible.
   <img alt="Dense VAE: input 784, hidden layer 512 with ReLU, Gaussian heads of size 16, decoder hidden layer 512 with ReLU, and 784 output logits. Sigmoid is applied for visualization." src="docs/figures/arch-vae-light.svg" width="100%">
 </picture>
 
-Implemented in `rs/src/models/vae.rs`.
+Implemented in `src/models/vae.rs`.
 
 ```text
 Encoder:
@@ -260,7 +260,7 @@ There is one hidden layer in the encoder and one in the decoder. The Gaussian
 heads and final output layer have no activation in the training path.
 
 Dense layers are constructed through the project's Xavier-uniform helper in
-`rs/src/models/utils.rs`. Initialization gains are configured at each call site.
+`src/models/utils.rs`. Initialization gains are configured at each call site.
 
 ### CNN-VAE
 
@@ -269,7 +269,7 @@ Dense layers are constructed through the project's Xavier-uniform helper in
   <img alt="CNN-VAE: two stride-2 convolutions reduce 1×28×28 to 64×7×7, linear Gaussian heads produce a 16-dimensional latent code, and a linear projection followed by two transposed convolutions reconstructs 1×28×28 logits." src="docs/figures/arch-cnn-light.svg" width="100%">
 </picture>
 
-Implemented in `rs/src/models/cnnvae.rs`.
+Implemented in `src/models/cnnvae.rs`.
 
 ```text
 Encoder:
@@ -289,15 +289,25 @@ Decoder:
   → flatten [N, 784] logits
 ```
 
-Spatial resolution changes as \(28 \rightarrow 14 \rightarrow 7\) in the encoder
-and \(7 \rightarrow 14 \rightarrow 28\) in the decoder.
+Spatial resolution changes as $28 \rightarrow 14 \rightarrow 7$ in the encoder
+and $7 \rightarrow 14 \rightarrow 28$ in the decoder.
 
 The model is not fully convolutional: it uses three linear projections around
 the 3,136-dimensional feature representation.
 
-The CNN layers use the initialization provided by their Burn configurations,
-rather than the dense model's custom linear helper. Initialization is therefore
-not identical across architectures.
+Input size, channel widths and latent size are passed to `CNNVAE::new` from
+`src/main.rs`, mirroring `VAE::new`. Initialization is explicit:
+
+| Layers | Initializer | Gain |
+| :-- | :-- | --: |
+| Linear heads and decoder projection | Xavier uniform (shared `linear` helper) | √2 |
+| `Conv2d` encoder layers | Xavier uniform | √2 |
+| First `ConvTranspose2d` | Kaiming uniform | √2 |
+| Output `ConvTranspose2d` | Kaiming uniform | 1 |
+
+Burn only provides `fan_in` to transposed convolutions, so Xavier cannot be used
+there. Initialization is therefore similar, but not identical, across
+architectures.
 
 ### Parameter counts
 
@@ -318,8 +328,8 @@ Convolutional weights are reused across spatial positions.
 
 ## Training protocol
 
-Configuration is defined in `rs/src/main.rs`; the shared implementation is in
-`rs/src/training.rs`.
+Configuration is defined in `src/main.rs`; the shared implementation is in
+`src/training.rs`.
 
 | Setting | Value |
 | :-- | :-- |
@@ -367,8 +377,10 @@ Both reported runs completed 100 epochs; early stopping did not trigger.
   <img alt="Training and validation BCE-plus-KL objectives for the dense VAE and CNN-VAE." src="docs/figures/loss-total-light.svg" width="100%">
 </picture>
 
-The plotted runs show a lower objective for the CNN-VAE. Learning-rate changes
-and beta warm-up should be considered when interpreting changes in slope.
+The plotted runs show a lower objective for the CNN-VAE throughout training;
+final validation totals are 101.46 (dense) and 96.31 (CNN). Beta warm-up covers
+epochs 1–5, and the learning rate was halved at epochs 65, 86 and 92 (dense) and
+77, 84 and 90 (CNN), which explains the visible steps late in training.
 
 Training metrics average losses computed while the model parameters are being
 updated. Validation metrics are computed afterward using a fixed evaluation
@@ -377,7 +389,7 @@ snapshot and multiple posterior samples. They are not identical measurements.
 A small train/validation gap is encouraging, but does not prove the absence of
 overfitting or establish that the models have converged.
 
-The selected checkpoints are epochs 95 and 98, respectively. The table reports
+The selected checkpoints are epochs 95 and 96, respectively. The table reports
 test results for those checkpoints, not necessarily for the final epoch.
 
 <picture>
@@ -397,9 +409,9 @@ initialization differences.
 The following grids use each model's best validation checkpoint and 64 latent
 codes sampled from the standard-normal prior:
 
-\[
+$$
 z \sim \mathcal{N}(0,I).
-\]
+$$
 
 | Dense VAE | CNN-VAE |
 | :--: | :--: |
@@ -547,32 +559,30 @@ a new experiment so that figures, tables and CSV results remain consistent.
 ```text
 .
 ├── Cargo.toml
-├── rs/
-│   └── src/
-│       ├── main.rs          # CLI, configuration and model selection
-│       ├── training.rs      # Shared loss, training and evaluation
-│       ├── io.rs            # PNG export and io module declaration
-│       ├── io/
-│       │   └── mnist.rs     # MNIST preprocessing, split and loaders
-│       ├── models.rs        # Shared VariationalModel interface
-│       └── models/
-│           ├── vae.rs       # Dense VAE
-│           ├── cnnvae.rs    # Convolutional VAE
-│           └── utils.rs     # Dense-layer initialization helper
+├── Cargo.lock
+├── src/
+│   ├── main.rs          # CLI, configuration and model selection
+│   ├── training.rs      # Shared loss, training and evaluation
+│   ├── io.rs            # PNG export and io module declaration
+│   ├── io/
+│   │   └── mnist.rs     # MNIST preprocessing, split and loaders
+│   ├── models.rs        # Shared VariationalModel interface
+│   └── models/
+│       ├── vae.rs       # Dense VAE
+│       ├── cnnvae.rs    # Convolutional VAE
+│       └── utils.rs     # Xavier-initialized linear layer helper
 ├── artifacts/
-│   ├── vae/
-│   └── cnn/
+│   ├── vae/             # Dense VAE results
+│   └── cnn/             # CNN-VAE results
 └── docs/
-    ├── charts/
-    └── figures/
+    ├── charts/          # Chart template and SVG exporter
+    └── figures/         # SVGs embedded in this README
 ```
-
-The binary source path is configured in `Cargo.toml`.
 
 ## Limitations
 
 - Results come from one seed per architecture.
-- Hardware details are required to contextualize the timing figures.
+- Timings come from a single machine (Apple M4) and are not a portable benchmark.
 - Architectures differ in parameter count, operations and initialization.
 - BCE is applied to continuous grayscale targets rather than binary observations.
 - KL is not a direct measurement of latent mutual information or disentanglement.

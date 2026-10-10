@@ -37,7 +37,7 @@ export const MODELS = {
 };
 
 export const METRICS = {
-  total: { label: "Total loss (−ELBO)", short: "Total", key: "total" },
+  total: { label: "Total loss (BCE + KL)", short: "Total", key: "total" },
   bce: { label: "Reconstruction (BCE)", short: "BCE", key: "bce" },
   kl: { label: "KL divergence", short: "KL", key: "kl" },
 };
