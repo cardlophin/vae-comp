@@ -82,13 +82,13 @@ A lower reconstruction loss does not automatically imply better prior samples.
 
 The prior is a standard normal distribution:
 
-$$
+```math
 p(z) = \mathcal{N}(0, I).
-$$
+```
 
 The encoder predicts a diagonal-Gaussian approximate posterior:
 
-$$
+```math
 q_\phi(z \mid x)
 =
 \mathcal{N}
@@ -96,13 +96,13 @@ q_\phi(z \mid x)
 \mu_\phi(x),
 \operatorname{diag}\left(\sigma_\phi^2(x)\right)
 \right).
-$$
+```
 
 For a valid observation likelihood, the negative ELBO consists of an expected
 negative log-likelihood and a KL regularization term. This project uses the
 following BCE-based training objective:
 
-$$
+```math
 \mathcal{L}_\beta(x)
 =
 \mathbb{E}_{q_\phi(z \mid x)}
@@ -118,7 +118,7 @@ D_{\mathrm{KL}}
 \left(
 q_\phi(z \mid x) \,\|\, \mathcal{N}(0,I)
 \right),
-$$
+```
 
 where $a_\theta(z)$ denotes the decoder's pixel logits.
 
@@ -129,7 +129,7 @@ They are not binarized.
 
 For a decoder logit $a_j$, the reconstruction term is:
 
-$$
+```math
 \operatorname{BCE}(a,x)
 =
 -\sum_{j=1}^{784}
@@ -138,7 +138,7 @@ x_j \log \operatorname{sigmoid}(a_j)
 +
 (1-x_j)\log \operatorname{sigmoid}(-a_j)
 \right].
-$$
+```
 
 The implementation uses `log_sigmoid` directly for numerical stability.
 It sums over the 784 pixels and averages over images in the batch.
@@ -163,13 +163,13 @@ Monte Carlo estimate of the negative ELBO under a Bernoulli decoder.
 
 The encoder outputs `mu` and `logvar`, with:
 
-$$
+```math
 \mathrm{logvar}_j = \log \sigma_j^2.
-$$
+```
 
 The KL divergence has the closed form:
 
-$$
+```math
 D_{\mathrm{KL}}
 =
 \frac{1}{2}
@@ -183,14 +183,14 @@ D_{\mathrm{KL}}
 -
 1
 \right].
-$$
+```
 
 It is summed over latent dimensions and averaged over images.
 
 A similar average KL does not imply that two models encode the same amount of
 information. The expected KL decomposes as:
 
-$$
+```math
 \mathbb{E}_{p_{\mathrm{data}}(x)}
 \left[
 D_{\mathrm{KL}}
@@ -205,7 +205,7 @@ D_{\mathrm{KL}}
 \left(
 q_\phi(z) \,\|\, p(z)
 \right),
-$$
+```
 
 where $q_\phi(z)$ is the aggregated posterior.
 
@@ -216,7 +216,7 @@ between the aggregated posterior and the prior.
 
 Latent codes are sampled using:
 
-$$
+```math
 z
 =
 \mu
@@ -225,7 +225,7 @@ z
 \odot \varepsilon,
 \qquad
 \varepsilon \sim \mathcal{N}(0,I).
-$$
+```
 
 The random noise is independent of the encoder parameters. The transformation
 from `mu`, `logvar` and noise to `z` remains differentiable.
@@ -409,9 +409,9 @@ initialization differences.
 The following grids use each model's best validation checkpoint and 64 latent
 codes sampled from the standard-normal prior:
 
-$$
+```math
 z \sim \mathcal{N}(0,I).
-$$
+```
 
 | Dense VAE | CNN-VAE |
 | :--: | :--: |
